@@ -47,29 +47,29 @@ def sub_cb(topic, msg):
 def read_moisture():
     adc_value = soil_pin.read_u16()
     moisture = 100 - ((adc_value - wet_value) * 100 / (dry_value - wet_value))
-    
+
     print(f"Moisture: {moisture:.2f}% | ADC Value: {adc_value}")
     mqttClient.publish(publish_topic_moisture_porcentage, str(f"{moisture:.2f}%"))
     mqttClient.publish(publish_topic_water_pump_status, str(adc_value))
-    
+
     return moisture, adc_value
-  
+
 def control_relays(on=False):
     moisture, adc_value = read_moisture()
-    
+
     if moisture < 60 or on:
         print(f"water pump turned on, watering for 5 seconds | Relay value: {relay_pin.value()} | Moisture: {moisture} ")
-        relay_pin.value(1) 
+        relay_pin.value(1)
         green_led(1)
         red_led(1)
         mqttClient.publish(publish_topic_water_pump_status, b'Water pump turned on')
         time.sleep(5)
-        
+
         relay_pin.value(0)
         mqttClient.publish(publish_topic_water_pump_status, b'Water pump turned off')
         print(f"water pump turned off again | Relay value: {relay_pin.value()}")
         red_led(0)
-        
+
     else:
         red_led(0)
         green_led(0)
