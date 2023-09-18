@@ -1,73 +1,84 @@
 import network
-from machine import ADC
+from machine import ADC, Pin
 import time
-import utime
-from machine import Pin
 from umqtt.simple import MQTTClient
 
-soil = ADC(Pin(27))
-led = Pin("LED", Pin.OUT)
-relay = Pin(0, Pin.OUT)
+# led and relay
+green_led = Pin("LED", Pin.OUT)
+red_led = Pin(27, Pin.OUT)
+relay_pin = Pin(17, Pin.OUT)
 
-when_wet = 24300
-when_dry = 58398
+# moisture
+soil_pin = ADC(Pin(26))
+dry_value = 62000
+wet_value = 7000
 
-wlan = network.WLAN(network.STA_IF)
-wlan.active(True)
-wlan.connect("wireless_AP","Piza123!:)") # safe password :)
-time.sleep(5)
-print(wlan.isconnected())
-
-
-mqtt_server = '192.168.2.2'
-client_id = 'wtf_is_an_client_id' # no idea what this does
-topic_pub = b'/wattering/pico'
-topic_pub_2 = b'/wattering/pico/info'
-
-#topic_msg = b'something happened' 
+# mqtt
+MQTT_BROKER = "ip_of_mqtt_broker"
+CLIENT_ID = 'wtf_is_an_client_id'
+publish_topic_moisture_porcentage = b'/watering/pico/moisture'
+publish_topic_water_pump_status = b'/watering/pico/water_pump_status'
+SUBSCRIBE_TOPIC = b"/watering/pico/to_pico"
 
 def mqtt_connect():
-    client = MQTTClient(client_id, mqtt_server, user="mqqt-bot", password="Pizza123!:)", keepalive=3600) # using safe password again :)
-    client.connect()
-    print('Connected to %s MQTT Broker'%(mqtt_server))
-    return client
+    global mqttClient  # Declare that we want to use the global mqttClient
+    print(f"Begin connection with MQTT Broker: {MQTT_BROKER}")
+    mqttClient = MQTTClient(CLIENT_ID, MQTT_BROKER, user="mqtt-bot", password="safe_password", keepalive=3600)
+    mqttClient.connect()
+    mqttClient.set_callback(sub_cb)  # Set the callback function
+    mqttClient.subscribe(SUBSCRIBE_TOPIC)  # Subscribe to the desired topic
+    print(f'Connected to {MQTT_BROKER} MQTT Broker')
 
 def reconnect():
     print('Failed to connect to the MQTT Broker. Reconnecting...')
     time.sleep(5)
     machine.reset()
 
-try:
-    client = mqtt_connect()
-except OSError as e:
-    reconnect()
-    
-    
-def get_moisture():
-    utime.sleep(5)
-    moisture_sensor =  (when_dry-soil.read_u16())*100/(when_dry-when_wet)
-    return moisture_sensor
-  
-def control_relays():
-    moisture = get_moisture()
-    print("Bodenfeuchtigkeit liegt bei " + "%.2f" % moisture +"% (ADC Wert: "+str(soil.read_u16())+")")
-    topic_msg = b"%.2f" % moisture
-    client.publish(topic_pub, topic_msg)
-    
-    if moisture < 60:
-        client.publish(topic_pub_2, b'Wasserpumpe läuft gerade')
-        led.value(1)        
-        relay.value(0)
-        utime.sleep(5)
-        
-        led.value(0)
-        relay.value(1)
+def sub_cb(topic, msg):
+    print(f"subscribed to topic: {topic} | received message : {msg}")
+    if msg.decode() == "ON":
+        control_relays(True)
+    elif msg.decode() == "SLEEP":
+        mqttClient.publish(publish_topic_water_pump_status, b'sleeping for 5 hours')
+        time.sleep(18000) # 18000 | 5 Hours sleep after watering)
     else:
-        led.value(0)
-        relay.value(1)
+        control_relays(False)
 
+def read_moisture():
+    adc_value = soil_pin.read_u16()
+    moisture = 100 - ((adc_value - wet_value) * 100 / (dry_value - wet_value))
+    
+    print(f"Moisture: {moisture:.2f}% | ADC Value: {adc_value}")
+    mqttClient.publish(publish_topic_moisture_porcentage, str(f"{moisture:.2f}%"))
+    mqttClient.publish(publish_topic_water_pump_status, str(adc_value))
+    
+    return moisture, adc_value
+  
+def control_relays(on=False):
+    moisture, adc_value = read_moisture()
+    
+    if moisture < 60 or on:
+        print(f"water pump turned on, watering for 5 seconds | Relay value: {relay_pin.value()} | Moisture: {moisture} ")
+        relay_pin.value(1) 
+        green_led(1)
+        red_led(1)
+        mqttClient.publish(publish_topic_water_pump_status, b'Water pump turned on')
+        time.sleep(5)
+        
+        relay_pin.value(0)
+        mqttClient.publish(publish_topic_water_pump_status, b'Water pump turned off')
+        print(f"water pump turned off again | Relay value: {relay_pin.value()}")
+        red_led(0)
+        
+    else:
+        red_led(0)
+        green_led(0)
+        relay_pin.value(0)
+
+mqtt_connect() # Connect to MQTT broker
 
 while True:
-    relay.value(0)
     control_relays()
-    
+    mqttClient.check_msg()
+    time.sleep(60)
+
