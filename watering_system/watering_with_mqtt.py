@@ -50,7 +50,7 @@ def read_moisture():
     
     print(f"Moisture: {moisture:.2f}% | ADC Value: {adc_value}")
     mqttClient.publish(publish_topic_moisture_porcentage, str(f"{moisture:.2f}%"))
-    # mqttClient.publish(publish_topic_water_pump_status, str(adc_value))
+    mqttClient.publish(publish_topic_water_pump_status, str(adc_value))
     
     return moisture, adc_value
   
@@ -58,7 +58,7 @@ def control_relays(on=False):
     moisture, adc_value = read_moisture()
     
     if moisture < 60 or on:
-        print(f"water pump turned on, waterin for 5 seconds | Relay value: {relay_pin.value()} | Moisture: {moisture} ")
+        print(f"water pump turned on, watering for 5 seconds | Relay value: {relay_pin.value()} | Moisture: {moisture} ")
         relay_pin.value(1) 
         green_led(1)
         red_led(1)
@@ -66,12 +66,9 @@ def control_relays(on=False):
         time.sleep(5)
         
         relay_pin.value(0)
-        mqttClient.publish(publish_topic_water_pump_status, b'Water pump turned off again, sleeping for 5 hours')
+        mqttClient.publish(publish_topic_water_pump_status, b'Water pump turned off')
         print(f"water pump turned off again | Relay value: {relay_pin.value()}")
-        
         red_led(0)
-        time.sleep(18000) # 18000 | 5 Hours sleep after watering
-        
         
     else:
         red_led(0)
@@ -83,5 +80,5 @@ mqtt_connect() # Connect to MQTT broker
 while True:
     control_relays()
     mqttClient.check_msg()
-    time.sleep(1)
+    time.sleep(60)
 
